@@ -24,11 +24,37 @@ using YOLOv8 on your GPU.
 
 - Python 3.10+
 - An NVIDIA GPU with CUDA support (recommended; CPU fallback is supported)
-- PyTorch with CUDA — install from https://pytorch.org/get-started/locally/
+- [uv](https://docs.astral.sh/uv/) (recommended) **or** pip
 
 ---
 
 ## Installation
+
+### With uv (recommended)
+
+```bash
+# 1. Clone
+git clone https://github.com/xransum/panopticon.git
+cd panopticon
+
+# 2. Sync the environment (uv creates .venv automatically)
+#    For NVIDIA CUDA 12.1 GPU:
+uv sync --extra cuda121
+
+#    CPU-only fallback:
+uv sync --extra cpu
+
+# 3. Run
+uv run python main.py
+# or use the installed script:
+uv run panopticon
+```
+
+> **Note:** `torch` and `torchvision` are pulled from the PyTorch CUDA 12.1
+> index automatically for Linux/Windows when using `--extra cuda121`.
+> macOS always uses the default PyPI index (CPU only).
+
+### With pip
 
 ```bash
 # 1. Clone
@@ -67,7 +93,9 @@ python main.py
 ```
 panopticon/
 ├── main.py                        # Entry point
-├── requirements.txt
+├── pyproject.toml                 # Project metadata + uv/pip config
+├── uv.lock                        # Locked dependency graph
+├── requirements.txt               # pip-compatible requirements
 └── panopticon/
     ├── app.py                     # QApplication bootstrap + dark theme
     ├── ui/

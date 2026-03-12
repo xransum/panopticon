@@ -1,0 +1,66 @@
+[project]
+name = "panopticon"
+version = "0.1.0"
+description = "GPU-accelerated AI window observer using YOLOv8"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "xransum" }]
+license = { text = "MIT" }
+
+dependencies = [
+    "PyQt6>=6.6.0",
+    "mss>=9.0.1",
+    "ultralytics>=8.0.0",
+    "numpy>=1.24.0",
+    "opencv-python>=4.9.0",
+    "Pillow>=10.0.0",
+    # Platform-specific window enumeration
+    "python-xlib>=0.33; sys_platform == 'linux'",
+    "pywin32>=306; sys_platform == 'win32'",
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+panopticon = "panopticon.app:run"
+
+[project.optional-dependencies]
+# PyTorch must be installed separately with the correct CUDA variant.
+# Use one of the extras below OR install manually:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+cuda121 = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+]
+cpu = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---------------------------------------------------------------------------
+# uv configuration
+# ---------------------------------------------------------------------------
+
+[tool.uv]
+# Override the torch index per-platform so uv can resolve the CUDA wheel.
+# Users on CPU-only machines can remove the override or use `--extra cpu`.
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["panopticon"]
