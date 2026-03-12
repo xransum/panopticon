@@ -1,6 +1,6 @@
 # Panopticon
 
-GPU-accelerated AI window observer. Select any window or process, and Panopticon
+GPU-accelerated AI window observer. Select any window or process and Panopticon
 will continuously capture it and run real-time object detection (people, things)
 using YOLOv8 on your GPU.
 
@@ -8,15 +8,13 @@ using YOLOv8 on your GPU.
 
 ## Features
 
-- **Window picker** - searchable list of all open windows by title and PID
-- **Live preview** - annotated feed with bounding boxes drawn over each frame
-- **Detection log** - timestamped log panel showing class, confidence, and box coords
-- **Follows the window** - tracks position changes each frame; capture continues
-  even if the window moves or is occluded
-- **GPU inference** - runs YOLOv8n on CUDA by default; falls back to CPU if
-  CUDA is unavailable
-- **Configurable interval** - default 100 ms (~10 FPS); adjustable via spinner
-- **Cross-platform** - Linux (X11), Windows, macOS
+- **Window picker** — searchable list of all open windows with application name, title, PID, and dimensions
+- **Live preview** — annotated feed with bounding boxes drawn over each frame
+- **Detection log** — timestamped log panel showing class, confidence, and bounding-box coordinates; capped at 500 lines to keep memory usage flat
+- **Follows the window** — tracks position changes each frame; capture continues even if the window moves or is occluded
+- **GPU inference** — runs YOLOv8n on CUDA by default; falls back to CPU automatically if CUDA is unavailable
+- **Configurable interval** — default 100 ms (~10 FPS); adjustable via toolbar spinner (10 – 5000 ms)
+- **Session log files** — each run writes a timestamped log to `etc/logs/<YYYYMMDD_HHMMSS>.log` for post-session debugging
 
 ---
 
@@ -96,8 +94,11 @@ panopticon/
 ├── pyproject.toml                 # Project metadata + uv/pip config
 ├── uv.lock                        # Locked dependency graph
 ├── requirements.txt               # pip-compatible requirements
+├── etc/
+│   └── logs/                      # Per-session log files (auto-created, gitignored)
 └── panopticon/
     ├── app.py                     # QApplication bootstrap + dark theme
+    ├── logging_setup.py           # Root logger configuration (file + console)
     ├── ui/
     │   ├── main_window.py         # Main window (preview + log)
     │   └── window_selector.py     # Window/process picker dialog
@@ -114,7 +115,7 @@ panopticon/
 
 ## Model
 
-The default model is `yolov8n.pt` (YOLOv8 nano) - fastest inference, smallest
+The default model is `yolov8n.pt` (YOLOv8 nano) — fastest inference, smallest
 memory footprint. You can swap it for a larger model in `app.py`:
 
 ```python
@@ -127,16 +128,24 @@ Models are downloaded automatically by Ultralytics on first run.
 
 ---
 
-## Platform Notes
+## Platform Support
 
-| Platform | Window enumeration | Capture method |
-|---|---|---|
-| Linux (X11) | `python-xlib` | `mss` |
-| Windows | `pywin32` | `PrintWindow` (captures minimized windows) + `mss` fallback |
-| macOS | `pyobjc-framework-Quartz` | `mss` |
+| Platform | Window enumeration | Capture method | Status |
+|---|---|---|---|
+| Linux (X11) | `python-xlib` | `mss` | Supported |
+| Linux (KDE Wayland) | KWin D-Bus | `spectacle` full-screen crop | Supported |
+| Windows | `pywin32` | `PrintWindow` + `mss` fallback | Supported |
+| macOS | `pyobjc-framework-Quartz` | `mss` | Supported |
 
-> **Wayland (Linux):** X11 window enumeration via `python-xlib` requires an
-> XWayland session.  Native Wayland window listing is not currently supported.
+### Known limitations
+
+- **Wayland (non-KDE):** GNOME, Sway, Hyprland, and other Wayland compositors are not supported. Window enumeration and screen capture on non-KDE Wayland requires compositor-specific portals that are not yet implemented.
+- **Wayland (KDE):** Capture requires `spectacle` (ships with KDE Plasma) to be installed and available on `$PATH`. Each frame triggers a full-screen grab that is then cropped, which is slower than the X11/mss path.
+- **Minimized windows (Windows):** `PrintWindow` is used to capture windows that are minimized or behind other windows. Some applications that render via DirectX/Vulkan may return a blank frame.
+- **macOS:** Capture requires screen recording permission granted to the terminal or application in **System Settings → Privacy & Security → Screen Recording**.
+- **GPU requirement:** CUDA inference requires an NVIDIA GPU with a compatible CUDA toolkit. AMD and Apple Silicon GPUs are not currently supported for GPU-accelerated inference; those platforms fall back to CPU automatically.
+- **Model classes:** The default `yolov8n.pt` detects the 80 COCO object classes. It does not detect application-specific UI elements or custom objects without a fine-tuned model.
+- **Occluded/off-screen windows:** If the target window is fully off-screen or its geometry cannot be resolved, capture silently produces no frames until the window is repositioned.
 
 ---
 
