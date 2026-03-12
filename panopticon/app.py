@@ -10,13 +10,13 @@ Handles:
 from __future__ import annotations
 
 import sys
-from PyQt6.QtWidgets import QApplication, QSplashScreen, QLabel
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QFont, QColor, QPainter
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+from PyQt6.QtWidgets import QApplication, QSplashScreen
 
 from panopticon.detection.detector import Detector
 from panopticon.ui.main_window import MainWindow
-
 
 _DARK_STYLESHEET = """
 QMainWindow, QDialog, QWidget {

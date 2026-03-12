@@ -14,14 +14,12 @@ no direct UI calls are made here.
 from __future__ import annotations
 
 import time
-import numpy as np
-from typing import Optional, List
 
-from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker
+from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
 
-from panopticon.utils.platform import WindowInfo
 from panopticon.capture.screenshot import ScreenshotCapture
-from panopticon.detection.detector import Detector, DetectionResult
+from panopticon.detection.detector import Detector
+from panopticon.utils.platform import WindowInfo
 
 
 class CaptureWorker(QThread):
@@ -60,7 +58,7 @@ class CaptureWorker(QThread):
         self._running = False
         self._paused = False
 
-        self._capture: Optional[ScreenshotCapture] = None
+        self._capture: ScreenshotCapture | None = None
 
     # ------------------------------------------------------------------
     # Control
@@ -163,7 +161,7 @@ class CaptureManager:
     def __init__(self, detector: Detector, interval_ms: int = 100):
         self._detector = detector
         self._interval_ms = interval_ms
-        self.worker: Optional[CaptureWorker] = None
+        self.worker: CaptureWorker | None = None
 
     @property
     def is_running(self) -> bool:

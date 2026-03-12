@@ -9,6 +9,7 @@ or after installing the package:
 """
 
 import sys
+
 from panopticon.app import run
 
 if __name__ == "__main__":

@@ -19,32 +19,28 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
-from typing import Optional, List
 
 import numpy as np
-
-from PyQt6.QtCore import Qt, QSize, pyqtSlot
-from PyQt6.QtGui import QImage, QPixmap, QFont, QColor
+from PyQt6.QtCore import QSize, Qt, pyqtSlot
+from PyQt6.QtGui import QFont, QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QHBoxLayout,
-    QVBoxLayout,
-    QSplitter,
     QLabel,
-    QToolBar,
+    QMainWindow,
     QPushButton,
-    QSpinBox,
-    QTextEdit,
-    QStatusBar,
     QSizePolicy,
-    QMessageBox,
+    QSpinBox,
+    QSplitter,
+    QStatusBar,
+    QTextEdit,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 
-from panopticon.utils.platform import WindowInfo
 from panopticon.capture.manager import CaptureManager
-from panopticon.detection.detector import Detector, DetectionResult
+from panopticon.detection.detector import DetectionResult, Detector
 from panopticon.ui.window_selector import WindowSelectorDialog
+from panopticon.utils.platform import WindowInfo
 
 
 class PreviewLabel(QLabel):
@@ -56,7 +52,7 @@ class PreviewLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background: #1a1a1a; border: 1px solid #333;")
         self.setMinimumSize(320, 240)
-        self._pixmap: Optional[QPixmap] = None
+        self._pixmap: QPixmap | None = None
 
     def set_frame(self, pixmap: QPixmap):
         self._pixmap = pixmap
@@ -88,11 +84,9 @@ class DetectionLogWidget(QTextEdit):
         font = QFont("Monospace", 9)
         font.setStyleHint(QFont.StyleHint.TypeWriter)
         self.setFont(font)
-        self.setStyleSheet(
-            "background: #0d0d0d; color: #e0e0e0; border: 1px solid #333;"
-        )
+        self.setStyleSheet("background: #0d0d0d; color: #e0e0e0; border: 1px solid #333;")
 
-    def append_detections(self, detections: List[DetectionResult]):
+    def append_detections(self, detections: list[DetectionResult]):
         if not detections:
             return
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -127,10 +121,10 @@ class MainWindow(QMainWindow):
 
         self._detector = detector
         self._manager = CaptureManager(detector, interval_ms=100)
-        self._current_window: Optional[WindowInfo] = None
+        self._current_window: WindowInfo | None = None
 
         # FPS tracking
-        self._frame_times: List[float] = []
+        self._frame_times: list[float] = []
 
         self._build_ui()
         self._build_toolbar()
@@ -156,9 +150,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         self._preview = PreviewLabel()
         left_layout.addWidget(self._preview)
-        self._no_target_label = QLabel(
-            'No window selected.\nUse "Select Window" to begin.'
-        )
+        self._no_target_label = QLabel('No window selected.\nUse "Select Window" to begin.')
         self._no_target_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._no_target_label.setStyleSheet("color: #888; font-size: 14px;")
         self._no_target_label.setVisible(True)
@@ -244,10 +236,7 @@ class MainWindow(QMainWindow):
 
     def _on_select_window(self):
         dlg = WindowSelectorDialog(self)
-        if (
-            dlg.exec() == WindowSelectorDialog.DialogCode.Accepted
-            and dlg.selected_window
-        ):
+        if dlg.exec() == WindowSelectorDialog.DialogCode.Accepted and dlg.selected_window:
             win = dlg.selected_window
             self._current_window = win
             self._status_window.setText(str(win))
@@ -299,7 +288,7 @@ class MainWindow(QMainWindow):
         worker.status.connect(self._on_capture_status)
 
     @pyqtSlot(object, object)
-    def _on_frame_ready(self, frame: np.ndarray, detections: List[DetectionResult]):
+    def _on_frame_ready(self, frame: np.ndarray, detections: list[DetectionResult]):
         # Track FPS
         now = time.monotonic()
         self._frame_times.append(now)

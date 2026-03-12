@@ -18,7 +18,7 @@ Model size:
 from __future__ import annotations
 
 import dataclasses
-from typing import List, Tuple, Optional
+
 import numpy as np
 
 
@@ -35,7 +35,7 @@ class DetectionResult:
     y2: int
 
     @property
-    def box(self) -> Tuple[int, int, int, int]:
+    def box(self) -> tuple[int, int, int, int]:
         return (self.x1, self.y1, self.x2, self.y2)
 
     @property
@@ -72,8 +72,8 @@ class Detector:
         self,
         model_name: str = "yolov8n.pt",
         confidence_threshold: float = 0.4,
-        classes: Optional[List[int]] = None,
-        device: Optional[str] = None,
+        classes: list[int] | None = None,
+        device: str | None = None,
     ):
         self.model_name = model_name
         self.confidence_threshold = confidence_threshold
@@ -94,10 +94,10 @@ class Detector:
             return
         try:
             from ultralytics import YOLO
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "ultralytics is required. Install with: pip install ultralytics"
-            )
+            ) from exc
         self._model = YOLO(self.model_name)
         # Warm up: run a blank frame so CUDA kernels are compiled
         dummy = np.zeros((64, 64, 3), dtype=np.uint8)
@@ -108,7 +108,7 @@ class Detector:
             conf=self.confidence_threshold,
         )
 
-    def detect(self, frame: np.ndarray) -> Tuple[np.ndarray, List[DetectionResult]]:
+    def detect(self, frame: np.ndarray) -> tuple[np.ndarray, list[DetectionResult]]:
         """
         Run detection on a BGR numpy frame.
 
@@ -136,7 +136,7 @@ class Detector:
         annotated: np.ndarray = result.plot()  # returns BGR ndarray
 
         # Parse structured results
-        detections: List[DetectionResult] = []
+        detections: list[DetectionResult] = []
         if result.boxes is not None:
             for box in result.boxes:
                 cls_id = int(box.cls[0])

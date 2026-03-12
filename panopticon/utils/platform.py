@@ -7,9 +7,8 @@ that works across Linux (X11), Windows, and macOS.
 
 from __future__ import annotations
 
-import sys
 import dataclasses
-from typing import List, Optional
+import sys
 
 
 @dataclasses.dataclass
@@ -19,21 +18,19 @@ class WindowInfo:
     title: str
     pid: int
     # Geometry: left, top, width, height (may be None if unavailable)
-    left: Optional[int] = None
-    top: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
+    left: int | None = None
+    top: int | None = None
+    width: int | None = None
+    height: int | None = None
     # Platform-specific handle (HWND on Windows, XID on Linux, CGWindowID on macOS)
-    handle: Optional[int] = None
+    handle: int | None = None
 
     @property
     def is_valid_geometry(self) -> bool:
-        return all(
-            v is not None for v in (self.left, self.top, self.width, self.height)
-        )
+        return all(v is not None for v in (self.left, self.top, self.width, self.height))
 
     @property
-    def geometry(self) -> Optional[dict]:
+    def geometry(self) -> dict | None:
         if not self.is_valid_geometry:
             return None
         return {
@@ -52,7 +49,7 @@ class WindowInfo:
 # ---------------------------------------------------------------------------
 
 
-def list_windows() -> List[WindowInfo]:
+def list_windows() -> list[WindowInfo]:
     """Return a list of all visible windows on the current platform."""
     if sys.platform.startswith("linux"):
         return _list_windows_linux()
@@ -64,7 +61,7 @@ def list_windows() -> List[WindowInfo]:
         raise NotImplementedError(f"Unsupported platform: {sys.platform}")
 
 
-def get_window_geometry(window: WindowInfo) -> Optional[dict]:
+def get_window_geometry(window: WindowInfo) -> dict | None:
     """
     Refresh and return the current geometry for a window.
     Returns None if the window no longer exists or geometry is unavailable.
@@ -83,14 +80,14 @@ def get_window_geometry(window: WindowInfo) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _list_windows_linux() -> List[WindowInfo]:
+def _list_windows_linux() -> list[WindowInfo]:
     try:
-        from Xlib import display as xdisplay, X
-        from Xlib.ext import res as xres
-    except ImportError:
+        from Xlib import X
+        from Xlib import display as xdisplay
+    except ImportError as exc:
         raise ImportError(
             "python-xlib is required on Linux. Install with: pip install python-xlib"
-        )
+        ) from exc
 
     d = xdisplay.Display()
     root = d.screen().root
@@ -103,7 +100,7 @@ def _list_windows_linux() -> List[WindowInfo]:
     if not client_list:
         return []
 
-    windows: List[WindowInfo] = []
+    windows: list[WindowInfo] = []
     for wid in client_list.value:
         try:
             win = d.create_resource_object("window", wid)
@@ -156,7 +153,7 @@ def _list_windows_linux() -> List[WindowInfo]:
     return windows
 
 
-def _get_geometry_linux(window: WindowInfo) -> Optional[dict]:
+def _get_geometry_linux(window: WindowInfo) -> dict | None:
     if window.handle is None:
         return None
     try:
@@ -183,16 +180,16 @@ def _get_geometry_linux(window: WindowInfo) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _list_windows_windows() -> List[WindowInfo]:
+def _list_windows_windows() -> list[WindowInfo]:
     try:
         import win32gui
         import win32process
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "pywin32 is required on Windows. Install with: pip install pywin32"
-        )
+        ) from exc
 
-    windows: List[WindowInfo] = []
+    windows: list[WindowInfo] = []
 
     def _enum_handler(hwnd, _):
         if not win32gui.IsWindowVisible(hwnd):
@@ -225,7 +222,7 @@ def _list_windows_windows() -> List[WindowInfo]:
     return windows
 
 
-def _get_geometry_windows(window: WindowInfo) -> Optional[dict]:
+def _get_geometry_windows(window: WindowInfo) -> dict | None:
     if window.handle is None:
         return None
     try:
@@ -243,22 +240,21 @@ def _get_geometry_windows(window: WindowInfo) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _list_windows_macos() -> List[WindowInfo]:
+def _list_windows_macos() -> list[WindowInfo]:
     try:
         import Quartz
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "pyobjc-framework-Quartz is required on macOS. "
             "Install with: pip install pyobjc-framework-Quartz"
-        )
+        ) from exc
 
     window_list = Quartz.CGWindowListCopyWindowInfo(
-        Quartz.kCGWindowListOptionOnScreenOnly
-        | Quartz.kCGWindowListExcludeDesktopElements,
+        Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
         Quartz.kCGNullWindowID,
     )
 
-    windows: List[WindowInfo] = []
+    windows: list[WindowInfo] = []
     for w in window_list:
         title = w.get("kCGWindowName", "") or w.get("kCGWindowOwnerName", "")
         pid = w.get("kCGWindowOwnerPID", 0)
@@ -288,7 +284,7 @@ def _list_windows_macos() -> List[WindowInfo]:
     return windows
 
 
-def _get_geometry_macos(window: WindowInfo) -> Optional[dict]:
+def _get_geometry_macos(window: WindowInfo) -> dict | None:
     if window.handle is None:
         return None
     try:

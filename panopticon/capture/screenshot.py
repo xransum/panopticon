@@ -11,8 +11,8 @@ are minimized or occluded by other windows.
 from __future__ import annotations
 
 import sys
+
 import numpy as np
-from typing import Optional, Tuple
 
 from panopticon.utils.platform import WindowInfo, get_window_geometry
 
@@ -28,7 +28,7 @@ class ScreenshotCapture:
 
     def __init__(self, window: WindowInfo):
         self.window = window
-        self._last_geometry: Optional[dict] = window.geometry
+        self._last_geometry: dict | None = window.geometry
         self._init_backend()
 
     def _init_backend(self):
@@ -40,7 +40,7 @@ class ScreenshotCapture:
     # Public API
     # ------------------------------------------------------------------
 
-    def grab(self) -> Optional[np.ndarray]:
+    def grab(self) -> np.ndarray | None:
         """
         Capture the current frame of the tracked window.
         Returns a BGR numpy array (H, W, 3), or None on failure.
@@ -62,16 +62,16 @@ class ScreenshotCapture:
         self._last_geometry = window.geometry
 
     def close(self):
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             self._mss.close()
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # Geometry
     # ------------------------------------------------------------------
 
-    def _refresh_geometry(self) -> Optional[dict]:
+    def _refresh_geometry(self) -> dict | None:
         """Get the latest window geometry, falling back to the last known."""
         geom = get_window_geometry(self.window)
         if geom and geom["width"] > 0 and geom["height"] > 0:
@@ -82,7 +82,7 @@ class ScreenshotCapture:
     # mss capture (universal fallback)
     # ------------------------------------------------------------------
 
-    def _grab_mss(self, geom: dict) -> Optional[np.ndarray]:
+    def _grab_mss(self, geom: dict) -> np.ndarray | None:
         try:
             monitor = {
                 "left": geom["left"],
@@ -102,7 +102,7 @@ class ScreenshotCapture:
     # Windows: PrintWindow (captures minimized / occluded windows)
     # ------------------------------------------------------------------
 
-    def _grab_win32_printwindow(self, geom: dict) -> Optional[np.ndarray]:
+    def _grab_win32_printwindow(self, geom: dict) -> np.ndarray | None:
         """
         Use Win32 PrintWindow to render the window into a DC.
         Works even when the window is minimized or behind other windows.
@@ -110,7 +110,6 @@ class ScreenshotCapture:
         try:
             import win32gui
             import win32ui
-            import win32con
 
             hwnd = self.window.handle
             width = geom["width"]
@@ -154,7 +153,7 @@ class ScreenshotCapture:
 # ------------------------------------------------------------------
 
 
-def capture_window(window: WindowInfo) -> Optional[np.ndarray]:
+def capture_window(window: WindowInfo) -> np.ndarray | None:
     """One-shot capture of a window. Creates and destroys a ScreenshotCapture."""
     cap = ScreenshotCapture(window)
     try:

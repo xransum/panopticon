@@ -8,21 +8,19 @@ The user picks one and clicks "Select".  They can also click
 
 from __future__ import annotations
 
-from typing import Optional, List
-
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QTimer
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont
+from PyQt6.QtCore import QSortFilterProxyModel, Qt
+from PyQt6.QtGui import QFont, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLineEdit,
-    QTreeView,
-    QPushButton,
-    QLabel,
-    QHeaderView,
     QAbstractItemView,
+    QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTreeView,
+    QVBoxLayout,
 )
 
 from panopticon.utils.platform import WindowInfo, list_windows
@@ -42,8 +40,8 @@ class WindowSelectorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Select Window")
         self.setMinimumSize(620, 420)
-        self.selected_window: Optional[WindowInfo] = None
-        self._windows: List[WindowInfo] = []
+        self.selected_window: WindowInfo | None = None
+        self._windows: list[WindowInfo] = []
 
         self._build_ui()
         self._load_windows()
@@ -88,12 +86,8 @@ class WindowSelectorDialog(QDialog):
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._tree.header().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self._tree.header().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.doubleClicked.connect(self._on_double_click)
         self._tree.selectionModel().selectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._tree)
