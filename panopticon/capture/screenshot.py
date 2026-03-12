@@ -32,6 +32,25 @@ def _is_kde_wayland() -> bool:
     )
 
 
+def _win32_printwindow_available() -> bool:
+    """
+    Check once at startup whether win32gui.PrintWindow exists.
+    Some pywin32 builds omit it; calling it per-frame and swallowing
+    AttributeError would spam the log on every capture tick.
+    """
+    try:
+        import win32gui
+
+        return hasattr(win32gui, "PrintWindow")
+    except ImportError:
+        return False
+
+
+_WIN32_PRINTWINDOW_AVAILABLE = _win32_printwindow_available()
+if sys.platform == "win32" and not _WIN32_PRINTWINDOW_AVAILABLE:
+    log.warning("win32gui.PrintWindow not available — falling back to mss for all captures")
+
+
 class ScreenshotCapture:
     """
     Captures screenshots of a target window.
@@ -66,7 +85,11 @@ class ScreenshotCapture:
         if geom is None:
             return None
 
-        if sys.platform == "win32" and self.window.handle is not None:
+        if (
+            sys.platform == "win32"
+            and _WIN32_PRINTWINDOW_AVAILABLE
+            and self.window.handle is not None
+        ):
             frame = self._grab_win32_printwindow(geom)
             if frame is not None:
                 return frame

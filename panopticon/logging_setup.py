@@ -12,7 +12,7 @@ directory the user launches the app from.
 Handlers
 --------
 - FileHandler  — DEBUG and above → etc/logs/<timestamp>.log
-- StreamHandler — DEBUG and above → stderr
+- StreamHandler — WARNING and above → stderr (avoids console spam)
 """
 
 from __future__ import annotations
@@ -53,9 +53,9 @@ def setup_logging() -> Path:
     fh.setFormatter(fmt)
     root.addHandler(fh)
 
-    # Console handler — mirrors to stderr so it's visible during development
+    # Console handler — WARNING and above only to avoid spamming the terminal
     sh = logging.StreamHandler(sys.stderr)
-    sh.setLevel(logging.DEBUG)
+    sh.setLevel(logging.WARNING)
     sh.setFormatter(fmt)
     root.addHandler(sh)
 
