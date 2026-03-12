@@ -1,0 +1,312 @@
+"""
+platform.py - OS-specific window enumeration helpers.
+
+Provides a unified WindowInfo dataclass and a list_windows() function
+that works across Linux (X11), Windows, and macOS.
+"""
+
+from __future__ import annotations
+
+import sys
+import dataclasses
+from typing import List, Optional
+
+
+@dataclasses.dataclass
+class WindowInfo:
+    """Represents a single open window / process."""
+
+    title: str
+    pid: int
+    # Geometry: left, top, width, height (may be None if unavailable)
+    left: Optional[int] = None
+    top: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    # Platform-specific handle (HWND on Windows, XID on Linux, CGWindowID on macOS)
+    handle: Optional[int] = None
+
+    @property
+    def is_valid_geometry(self) -> bool:
+        return all(
+            v is not None for v in (self.left, self.top, self.width, self.height)
+        )
+
+    @property
+    def geometry(self) -> Optional[dict]:
+        if not self.is_valid_geometry:
+            return None
+        return {
+            "left": self.left,
+            "top": self.top,
+            "width": self.width,
+            "height": self.height,
+        }
+
+    def __str__(self) -> str:
+        return f"[{self.pid}] {self.title or '(untitled)'}"
+
+
+# ---------------------------------------------------------------------------
+# Platform dispatch
+# ---------------------------------------------------------------------------
+
+
+def list_windows() -> List[WindowInfo]:
+    """Return a list of all visible windows on the current platform."""
+    if sys.platform.startswith("linux"):
+        return _list_windows_linux()
+    elif sys.platform == "win32":
+        return _list_windows_windows()
+    elif sys.platform == "darwin":
+        return _list_windows_macos()
+    else:
+        raise NotImplementedError(f"Unsupported platform: {sys.platform}")
+
+
+def get_window_geometry(window: WindowInfo) -> Optional[dict]:
+    """
+    Refresh and return the current geometry for a window.
+    Returns None if the window no longer exists or geometry is unavailable.
+    """
+    if sys.platform.startswith("linux"):
+        return _get_geometry_linux(window)
+    elif sys.platform == "win32":
+        return _get_geometry_windows(window)
+    elif sys.platform == "darwin":
+        return _get_geometry_macos(window)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Linux (X11)
+# ---------------------------------------------------------------------------
+
+
+def _list_windows_linux() -> List[WindowInfo]:
+    try:
+        from Xlib import display as xdisplay, X
+        from Xlib.ext import res as xres
+    except ImportError:
+        raise ImportError(
+            "python-xlib is required on Linux. Install with: pip install python-xlib"
+        )
+
+    d = xdisplay.Display()
+    root = d.screen().root
+    NET_CLIENT_LIST = d.intern_atom("_NET_CLIENT_LIST")
+    NET_WM_NAME = d.intern_atom("_NET_WM_NAME")
+    WM_NAME = d.intern_atom("WM_NAME")
+    NET_WM_PID = d.intern_atom("_NET_WM_PID")
+
+    client_list = root.get_full_property(NET_CLIENT_LIST, X.AnyPropertyType)
+    if not client_list:
+        return []
+
+    windows: List[WindowInfo] = []
+    for wid in client_list.value:
+        try:
+            win = d.create_resource_object("window", wid)
+
+            # Title
+            name_prop = win.get_full_property(NET_WM_NAME, 0)
+            if name_prop and name_prop.value:
+                title = name_prop.value.decode("utf-8", errors="replace")
+            else:
+                name_prop = win.get_full_property(WM_NAME, X.AnyPropertyType)
+                if name_prop and name_prop.value:
+                    val = name_prop.value
+                    title = (
+                        val.decode("latin-1", errors="replace")
+                        if isinstance(val, bytes)
+                        else str(val)
+                    )
+                else:
+                    title = ""
+
+            # PID
+            pid_prop = win.get_full_property(NET_WM_PID, X.AnyPropertyType)
+            pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else 0
+
+            # Geometry
+            geom = win.get_geometry()
+            # Translate to root coordinates
+            translated = win.translate_coords(root, 0, 0)
+            left = translated.x
+            top = translated.y
+            width = geom.width
+            height = geom.height
+
+            if title and width > 1 and height > 1:
+                windows.append(
+                    WindowInfo(
+                        title=title,
+                        pid=pid,
+                        left=left,
+                        top=top,
+                        width=width,
+                        height=height,
+                        handle=wid,
+                    )
+                )
+        except Exception:
+            continue
+
+    d.close()
+    return windows
+
+
+def _get_geometry_linux(window: WindowInfo) -> Optional[dict]:
+    if window.handle is None:
+        return None
+    try:
+        from Xlib import display as xdisplay
+
+        d = xdisplay.Display()
+        root = d.screen().root
+        win = d.create_resource_object("window", window.handle)
+        geom = win.get_geometry()
+        translated = win.translate_coords(root, 0, 0)
+        d.close()
+        return {
+            "left": translated.x,
+            "top": translated.y,
+            "width": geom.width,
+            "height": geom.height,
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Windows (Win32)
+# ---------------------------------------------------------------------------
+
+
+def _list_windows_windows() -> List[WindowInfo]:
+    try:
+        import win32gui
+        import win32process
+    except ImportError:
+        raise ImportError(
+            "pywin32 is required on Windows. Install with: pip install pywin32"
+        )
+
+    windows: List[WindowInfo] = []
+
+    def _enum_handler(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        if not title:
+            return
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            rect = win32gui.GetWindowRect(hwnd)
+            left, top, right, bottom = rect
+            width = right - left
+            height = bottom - top
+            if width > 0 and height > 0:
+                windows.append(
+                    WindowInfo(
+                        title=title,
+                        pid=pid,
+                        left=left,
+                        top=top,
+                        width=width,
+                        height=height,
+                        handle=hwnd,
+                    )
+                )
+        except Exception:
+            pass
+
+    win32gui.EnumWindows(_enum_handler, None)
+    return windows
+
+
+def _get_geometry_windows(window: WindowInfo) -> Optional[dict]:
+    if window.handle is None:
+        return None
+    try:
+        import win32gui
+
+        rect = win32gui.GetWindowRect(window.handle)
+        left, top, right, bottom = rect
+        return {"left": left, "top": top, "width": right - left, "height": bottom - top}
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# macOS (Quartz)
+# ---------------------------------------------------------------------------
+
+
+def _list_windows_macos() -> List[WindowInfo]:
+    try:
+        import Quartz
+    except ImportError:
+        raise ImportError(
+            "pyobjc-framework-Quartz is required on macOS. "
+            "Install with: pip install pyobjc-framework-Quartz"
+        )
+
+    window_list = Quartz.CGWindowListCopyWindowInfo(
+        Quartz.kCGWindowListOptionOnScreenOnly
+        | Quartz.kCGWindowListExcludeDesktopElements,
+        Quartz.kCGNullWindowID,
+    )
+
+    windows: List[WindowInfo] = []
+    for w in window_list:
+        title = w.get("kCGWindowName", "") or w.get("kCGWindowOwnerName", "")
+        pid = w.get("kCGWindowOwnerPID", 0)
+        wid = w.get("kCGWindowNumber", None)
+        bounds = w.get("kCGWindowBounds")
+        if bounds:
+            left = int(bounds.get("X", 0))
+            top = int(bounds.get("Y", 0))
+            width = int(bounds.get("Width", 0))
+            height = int(bounds.get("Height", 0))
+        else:
+            left = top = width = height = 0
+
+        if title and width > 0 and height > 0:
+            windows.append(
+                WindowInfo(
+                    title=title,
+                    pid=pid,
+                    left=left,
+                    top=top,
+                    width=width,
+                    height=height,
+                    handle=wid,
+                )
+            )
+
+    return windows
+
+
+def _get_geometry_macos(window: WindowInfo) -> Optional[dict]:
+    if window.handle is None:
+        return None
+    try:
+        import Quartz
+
+        window_list = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionIncludingWindow,
+            window.handle,
+        )
+        for w in window_list:
+            bounds = w.get("kCGWindowBounds")
+            if bounds:
+                return {
+                    "left": int(bounds.get("X", 0)),
+                    "top": int(bounds.get("Y", 0)),
+                    "width": int(bounds.get("Width", 0)),
+                    "height": int(bounds.get("Height", 0)),
+                }
+    except Exception:
+        pass
+    return None
