@@ -18,6 +18,7 @@ Layout
 from __future__ import annotations
 
 import time
+from collections import deque
 from datetime import datetime
 
 import numpy as np
@@ -26,12 +27,12 @@ from PyQt6.QtGui import QFont, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSpinBox,
     QSplitter,
     QStatusBar,
-    QTextEdit,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -72,7 +73,7 @@ class PreviewLabel(QLabel):
             super().setPixmap(scaled)
 
 
-class DetectionLogWidget(QTextEdit):
+class DetectionLogWidget(QPlainTextEdit):
     """Read-only auto-scrolling log of detection events."""
 
     MAX_LINES = 500
@@ -80,7 +81,10 @@ class DetectionLogWidget(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        # Qt trims oldest blocks automatically when the document exceeds this
+        # limit, with no manual cursor loop required.
+        self.setMaximumBlockCount(self.MAX_LINES)
         font = QFont("Monospace", 9)
         font.setStyleHint(QFont.StyleHint.TypeWriter)
         self.setFont(font)
@@ -90,22 +94,16 @@ class DetectionLogWidget(QTextEdit):
         if not detections:
             return
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        for d in detections:
-            line = f"[{ts}] {d.label:<15} {d.confidence:5.1%}  box=({d.x1},{d.y1},{d.x2},{d.y2})"
-            self.append(line)
-
-        # Trim to MAX_LINES
-        doc = self.document()
-        while doc.blockCount() > self.MAX_LINES:
-            cursor = self.textCursor()
-            cursor.movePosition(cursor.MoveOperation.Start)
-            cursor.select(cursor.SelectionType.BlockUnderCursor)
-            cursor.removeSelectedText()
-            cursor.deleteChar()  # newline
-
-        # Auto-scroll
-        sb = self.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        # Build all lines for this frame and append in one call to avoid
+        # triggering a layout/repaint for every individual detection.
+        lines = "\n".join(
+            f"[{ts}] {d.label:<15} {d.confidence:5.1%}  box=({d.x1},{d.y1},{d.x2},{d.y2})"
+            for d in detections
+        )
+        self.appendPlainText(lines)
+        # appendPlainText already scrolls to the bottom; the scrollbar update
+        # below keeps the view pinned when the user has not manually scrolled.
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
     def clear_log(self):
         self.clear()
@@ -123,8 +121,9 @@ class MainWindow(QMainWindow):
         self._manager = CaptureManager(detector, interval_ms=100)
         self._current_window: WindowInfo | None = None
 
-        # FPS tracking
-        self._frame_times: list[float] = []
+        # FPS tracking — keep at most 1 s worth of timestamps.
+        # deque with maxlen avoids rebuilding the list on every frame.
+        self._frame_times: deque[float] = deque()
 
         self._build_ui()
         self._build_toolbar()
@@ -289,11 +288,12 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object, object)
     def _on_frame_ready(self, frame: np.ndarray, detections: list[DetectionResult]):
-        # Track FPS
+        # Track FPS — drop timestamps older than 1 second from the left.
         now = time.monotonic()
         self._frame_times.append(now)
         cutoff = now - 1.0
-        self._frame_times = [t for t in self._frame_times if t >= cutoff]
+        while self._frame_times and self._frame_times[0] < cutoff:
+            self._frame_times.popleft()
         fps = len(self._frame_times)
         self._status_fps.setText(f"{fps} FPS")
 
