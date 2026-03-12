@@ -9,6 +9,7 @@ Handles:
 
 from __future__ import annotations
 
+import logging
 import sys
 
 from PyQt6.QtCore import Qt
@@ -16,7 +17,10 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 
 from panopticon.detection.detector import Detector
+from panopticon.logging_setup import setup_logging
 from panopticon.ui.main_window import MainWindow
+
+log = logging.getLogger(__name__)
 
 _DARK_STYLESHEET = """
 QMainWindow, QDialog, QWidget {
@@ -127,6 +131,9 @@ def run(argv=None):
     if argv is None:
         argv = sys.argv
 
+    log_file = setup_logging()
+    log.info("Panopticon starting — log file: %s", log_file)
+
     app = QApplication(argv)
     app.setApplicationName("Panopticon")
     app.setOrganizationName("panopticon")
@@ -144,7 +151,9 @@ def run(argv=None):
 
     try:
         detector.load()
+        log.info("Model loaded successfully on %s", detector.device_label)
     except Exception as exc:
+        log.exception("Failed to load model: %s", exc)
         splash.hide()
         from PyQt6.QtWidgets import QMessageBox
 
@@ -159,5 +168,6 @@ def run(argv=None):
     window = MainWindow(detector)
     window.show()
     splash.finish(window)
+    log.info("Main window shown")
 
     return app.exec()

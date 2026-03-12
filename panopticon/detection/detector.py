@@ -18,8 +18,11 @@ Model size:
 from __future__ import annotations
 
 import dataclasses
+import logging
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -99,6 +102,7 @@ class Detector:
                 "ultralytics is required. Install with: pip install ultralytics"
             ) from exc
         self._model = YOLO(self.model_name)
+        log.info("Loaded model '%s' on device '%s'", self.model_name, self.device)
         # Warm up: run a blank frame so CUDA kernels are compiled
         dummy = np.zeros((64, 64, 3), dtype=np.uint8)
         self._model.predict(

@@ -13,6 +13,7 @@ no direct UI calls are made here.
 
 from __future__ import annotations
 
+import logging
 import time
 
 from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
@@ -20,6 +21,8 @@ from PyQt6.QtCore import QMutex, QMutexLocker, QThread, pyqtSignal
 from panopticon.capture.screenshot import ScreenshotCapture
 from panopticon.detection.detector import Detector
 from panopticon.utils.platform import WindowInfo
+
+log = logging.getLogger(__name__)
 
 
 class CaptureWorker(QThread):
@@ -97,6 +100,7 @@ class CaptureWorker(QThread):
 
         self._capture = ScreenshotCapture(window)
         self.status.emit(f"Capturing: {window}")
+        log.info("Capture started for window: %s", window)
 
         consecutive_failures = 0
         MAX_FAILURES = 20  # ~2 s at 100 ms intervals before emitting error
@@ -119,6 +123,9 @@ class CaptureWorker(QThread):
             if frame is None:
                 consecutive_failures += 1
                 if consecutive_failures >= MAX_FAILURES:
+                    log.warning(
+                        "Window lost — no frame received after %d attempts", consecutive_failures
+                    )
                     self.error.emit("Window lost - no frame received.")
                     consecutive_failures = 0
                 time.sleep(interval / 1000.0)
@@ -130,6 +137,7 @@ class CaptureWorker(QThread):
             try:
                 annotated, detections = self._detector.detect(frame)
             except Exception as exc:
+                log.exception("Detection error: %s", exc)
                 self.error.emit(f"Detection error: {exc}")
                 annotated = frame
                 detections = []
@@ -144,6 +152,7 @@ class CaptureWorker(QThread):
 
         if self._capture:
             self._capture.close()
+        log.info("Capture stopped for window: %s", window)
         self.status.emit("Capture stopped.")
 
 

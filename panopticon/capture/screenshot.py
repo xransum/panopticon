@@ -13,11 +13,14 @@ grab then crops to the window region, since XGetImage is unavailable.
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import numpy as np
 
 from panopticon.utils.platform import WindowInfo, get_window_geometry
+
+log = logging.getLogger(__name__)
 
 
 def _is_kde_wayland() -> bool:
@@ -122,6 +125,7 @@ class ScreenshotCapture:
                 timeout=5,
             )
             if result.returncode != 0:
+                log.warning("spectacle exited with code %d", result.returncode)
                 return None
 
             full = cv2.imread(outfile)
@@ -141,6 +145,7 @@ class ScreenshotCapture:
 
             return full[y:y2, x:x2]
         except Exception:
+            log.debug("spectacle grab failed", exc_info=True)
             return None
         finally:
             import contextlib
@@ -167,6 +172,7 @@ class ScreenshotCapture:
             frame = frame.reshape((sct_img.height, sct_img.width, 4))
             return frame[:, :, :3]  # BGR
         except Exception:
+            log.debug("mss grab failed", exc_info=True)
             return None
 
     # ------------------------------------------------------------------
@@ -216,6 +222,7 @@ class ScreenshotCapture:
 
             return frame
         except Exception:
+            log.debug("win32 PrintWindow grab failed", exc_info=True)
             return None
 
 
