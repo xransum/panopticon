@@ -1,7 +1,8 @@
 """
-window_selector.py - Dialog for selecting a target window or process.
+window_selector.py - Dialog for selecting a target window.
 
-Shows a searchable list of all open windows (title + PID).
+Shows a searchable list of all open windows with columns for
+Application, Title, PID, and Dimensions.
 The user picks one and clicks "Select".  They can also click
 "Refresh" to re-enumerate windows without closing the dialog.
 """
@@ -55,7 +56,7 @@ class WindowSelectorDialog(QDialog):
         layout.setSpacing(8)
 
         # Header label
-        header = QLabel("Select a window or process to monitor:")
+        header = QLabel("Select a window to monitor:")
         font = QFont()
         font.setBold(True)
         header.setFont(font)
@@ -63,14 +64,14 @@ class WindowSelectorDialog(QDialog):
 
         # Search bar
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Filter by title or PID...")
+        self._search.setPlaceholderText("Filter by application, title, or PID...")
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_filter_changed)
         layout.addWidget(self._search)
 
-        # Table model
-        self._model = QStandardItemModel(0, 3)
-        self._model.setHorizontalHeaderLabels(["Title", "PID", "Geometry"])
+        # Table model  (Application | Title | PID | Dimensions)
+        self._model = QStandardItemModel(0, 4)
+        self._model.setHorizontalHeaderLabels(["Application", "Title", "PID", "Dimensions"])
 
         self._proxy = QSortFilterProxyModel()
         self._proxy.setSourceModel(self._model)
@@ -85,9 +86,10 @@ class WindowSelectorDialog(QDialog):
         self._tree.setAlternatingRowColors(True)
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.doubleClicked.connect(self._on_double_click)
         self._tree.selectionModel().selectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._tree)
@@ -135,24 +137,22 @@ class WindowSelectorDialog(QDialog):
             return
 
         for win in self._windows:
+            app_item = QStandardItem(win.application or "")
+            app_item.setData(win)  # store WindowInfo on the first item
+
             title_item = QStandardItem(win.title)
-            title_item.setData(win)  # store WindowInfo on the item
 
             pid_item = QStandardItem(str(win.pid) if win.pid else "")
             pid_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            if win.is_valid_geometry:
-                geo_str = f"{win.width}x{win.height} @ ({win.left},{win.top})"
-            else:
-                geo_str = "unknown"
-            geo_item = QStandardItem(geo_str)
-            geo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            dim_str = f"{win.width} × {win.height}" if win.is_valid_geometry else "unknown"
+            dim_item = QStandardItem(dim_str)
+            dim_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            # Make PID and geometry items non-selectable as primary data
-            for item in (pid_item, geo_item):
+            for item in (title_item, pid_item, dim_item):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
 
-            self._model.appendRow([title_item, pid_item, geo_item])
+            self._model.appendRow([app_item, title_item, pid_item, dim_item])
 
         count = self._model.rowCount()
         self._status_label.setText(f"{count} window{'s' if count != 1 else ''} found.")

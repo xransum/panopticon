@@ -11,12 +11,34 @@ import dataclasses
 import sys
 
 
+def _process_name(pid: int) -> str:
+    """Return the executable name for *pid*, or '' on any failure."""
+    if not pid:
+        return ""
+    try:
+        import psutil
+
+        return psutil.Process(pid).name()
+    except Exception:
+        pass
+    # Fallback: read /proc/<pid>/comm on Linux without psutil
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{pid}/comm") as fh:
+                return fh.read().strip()
+        except Exception:
+            pass
+    return ""
+
+
 @dataclasses.dataclass
 class WindowInfo:
     """Represents a single open window / process."""
 
     title: str
     pid: int
+    # Application (process) name derived from the owning process
+    application: str = ""
     # Geometry: left, top, width, height (may be None if unavailable)
     left: int | None = None
     top: int | None = None
@@ -139,6 +161,7 @@ def _list_windows_linux() -> list[WindowInfo]:
                     WindowInfo(
                         title=title,
                         pid=pid,
+                        application=_process_name(pid),
                         left=left,
                         top=top,
                         width=width,
@@ -208,6 +231,7 @@ def _list_windows_windows() -> list[WindowInfo]:
                     WindowInfo(
                         title=title,
                         pid=pid,
+                        application=_process_name(pid),
                         left=left,
                         top=top,
                         width=width,
@@ -256,7 +280,8 @@ def _list_windows_macos() -> list[WindowInfo]:
 
     windows: list[WindowInfo] = []
     for w in window_list:
-        title = w.get("kCGWindowName", "") or w.get("kCGWindowOwnerName", "")
+        app_name = w.get("kCGWindowOwnerName", "") or ""
+        title = w.get("kCGWindowName", "") or app_name
         pid = w.get("kCGWindowOwnerPID", 0)
         wid = w.get("kCGWindowNumber", None)
         bounds = w.get("kCGWindowBounds")
@@ -273,6 +298,7 @@ def _list_windows_macos() -> list[WindowInfo]:
                 WindowInfo(
                     title=title,
                     pid=pid,
+                    application=app_name,
                     left=left,
                     top=top,
                     width=width,
