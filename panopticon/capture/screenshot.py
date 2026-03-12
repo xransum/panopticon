@@ -6,6 +6,9 @@ APIs to locate the window rect each frame so it follows the window if it moves.
 
 On Windows, falls back to PrintWindow (win32gui) for capturing windows that
 are minimized or occluded by other windows.
+
+On KDE Wayland, uses spectacle (ships with KDE Plasma) for a full-screen
+grab then crops to the window region, since XGetImage is unavailable.
 """
 
 from __future__ import annotations
@@ -15,6 +18,15 @@ import sys
 import numpy as np
 
 from panopticon.utils.platform import WindowInfo, get_window_geometry
+
+
+def _is_kde_wayland() -> bool:
+    import os
+
+    return (
+        os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+        and os.environ.get("XDG_CURRENT_DESKTOP", "").upper() == "KDE"
+    )
 
 
 class ScreenshotCapture:
@@ -29,9 +41,11 @@ class ScreenshotCapture:
     def __init__(self, window: WindowInfo):
         self.window = window
         self._last_geometry: dict | None = window.geometry
-        self._init_backend()
+        self._kde_wayland = _is_kde_wayland()
+        if not self._kde_wayland:
+            self._init_mss()
 
-    def _init_backend(self):
+    def _init_mss(self):
         import mss
 
         self._mss = mss.mss()
@@ -54,6 +68,9 @@ class ScreenshotCapture:
             if frame is not None:
                 return frame
 
+        if self._kde_wayland:
+            return self._grab_spectacle(geom)
+
         return self._grab_mss(geom)
 
     def update_window(self, window: WindowInfo):
@@ -64,8 +81,9 @@ class ScreenshotCapture:
     def close(self):
         import contextlib
 
-        with contextlib.suppress(Exception):
-            self._mss.close()
+        if not self._kde_wayland:
+            with contextlib.suppress(Exception):
+                self._mss.close()
 
     # ------------------------------------------------------------------
     # Geometry
@@ -79,7 +97,60 @@ class ScreenshotCapture:
         return self._last_geometry
 
     # ------------------------------------------------------------------
-    # mss capture (universal fallback)
+    # KDE Wayland: spectacle fullscreen grab + crop
+    # ------------------------------------------------------------------
+
+    def _grab_spectacle(self, geom: dict) -> np.ndarray | None:
+        """
+        Capture the full screen via spectacle then crop to the window region.
+
+        spectacle ships with KDE Plasma and is authorised by KWin to capture
+        the compositor surface, which bypasses the XGetImage restriction.
+        """
+        import subprocess
+        import tempfile
+
+        import cv2
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+                outfile = fh.name
+
+            result = subprocess.run(
+                ["spectacle", "-b", "-f", "-n", "-o", outfile],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            full = cv2.imread(outfile)
+            if full is None:
+                return None
+
+            x = max(0, geom["left"])
+            y = max(0, geom["top"])
+            w = geom["width"]
+            h = geom["height"]
+            fh_img, fw_img = full.shape[:2]
+            x2 = min(x + w, fw_img)
+            y2 = min(y + h, fh_img)
+
+            if x2 <= x or y2 <= y:
+                return None
+
+            return full[y:y2, x:x2]
+        except Exception:
+            return None
+        finally:
+            import contextlib
+            import os
+
+            with contextlib.suppress(Exception):
+                os.unlink(outfile)
+
+    # ------------------------------------------------------------------
+    # mss capture (Linux X11, macOS, Windows fallback)
     # ------------------------------------------------------------------
 
     def _grab_mss(self, geom: dict) -> np.ndarray | None:

@@ -2,7 +2,11 @@
 platform.py - OS-specific window enumeration helpers.
 
 Provides a unified WindowInfo dataclass and a list_windows() function
-that works across Linux (X11), Windows, and macOS.
+that works across Linux (X11 and KDE Wayland), Windows, and macOS.
+
+Linux detection order:
+  1. KDE Wayland  – KWin D-Bus scripting (no python-xlib needed)
+  2. X11 / XWayland – python-xlib (classic EWMH window list)
 """
 
 from __future__ import annotations
@@ -44,8 +48,9 @@ class WindowInfo:
     top: int | None = None
     width: int | None = None
     height: int | None = None
-    # Platform-specific handle (HWND on Windows, XID on Linux, CGWindowID on macOS)
-    handle: int | None = None
+    # Platform-specific handle: HWND (int) on Windows, XID (int) on Linux X11,
+    # CGWindowID (int) on macOS, or KWin UUID string on KDE Wayland.
+    handle: int | str | None = None
 
     @property
     def is_valid_geometry(self) -> bool:
@@ -98,17 +103,199 @@ def get_window_geometry(window: WindowInfo) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Linux (X11)
+# Linux – backend detection
 # ---------------------------------------------------------------------------
 
 
+def _is_kde_wayland() -> bool:
+    """True when running inside a KDE Plasma Wayland session."""
+    import os
+
+    return (
+        os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+        and os.environ.get("XDG_CURRENT_DESKTOP", "").upper() == "KDE"
+    )
+
+
 def _list_windows_linux() -> list[WindowInfo]:
+    if _is_kde_wayland():
+        try:
+            return _list_windows_kwin()
+        except Exception:
+            pass  # fall through to X11
+    return _list_windows_x11()
+
+
+def _get_geometry_linux(window: WindowInfo) -> dict | None:
+    # KWin windows store their UUID as a string handle
+    if isinstance(window.handle, str):
+        return _get_geometry_kwin(window)
+    return _get_geometry_x11(window)
+
+
+# ---------------------------------------------------------------------------
+# Linux – KDE Wayland via KWin D-Bus
+# ---------------------------------------------------------------------------
+
+# KWin JS snippet that prints one pipe-delimited line per non-taskbar-skipped window:
+#   caption|pid|x|y|width|height|internalId
+_KWIN_ENUM_SCRIPT = """\
+var clients = workspace.clientList();
+for (var i = 0; i < clients.length; i++) {
+    var c = clients[i];
+    if (!c.skipTaskbar && c.width > 1 && c.height > 1 && c.caption) {
+        print(c.caption + "|" + c.pid + "|" + c.x + "|" + c.y + "|" + c.width + "|" + c.height + "|" + c.internalId);
+    }
+}
+"""
+
+
+def _kwin_run_script(js: str) -> list[str]:
+    """
+    Load a KWin JS snippet, run it, harvest its print() output from the
+    systemd journal, then unload the script.  Returns a list of output lines.
+    """
+    import os
+    import subprocess
+    import tempfile
+    import time
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(js)
+        script_path = fh.name
+
+    try:
+        # Record timestamp before running so we only read fresh journal lines
+        before = time.time()
+
+        r = subprocess.run(
+            [
+                "qdbus",
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.loadScript",
+                script_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        script_id = r.stdout.strip()
+        if not script_id.isdigit():
+            return []
+
+        subprocess.run(
+            ["qdbus", "org.kde.KWin", f"/{script_id}", "org.kde.kwin.Script.run"],
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(0.15)  # give the script a moment to finish and journal to flush
+
+        # Collect output lines written by print() inside the script
+        journal = subprocess.run(
+            [
+                "journalctl",
+                "--user",
+                "-u",
+                "plasma-kwin_wayland",
+                "--since",
+                f"@{before:.6f}",
+                "--no-pager",
+                "-o",
+                "cat",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        # Unload the script to avoid accumulation
+        subprocess.run(
+            ["qdbus", "org.kde.KWin", f"/{script_id}", "org.kde.kwin.Script.stop"],
+            capture_output=True,
+            timeout=3,
+        )
+
+        lines = []
+        for line in journal.stdout.splitlines():
+            # journal lines from KWin scripts are prefixed with "js: "
+            if line.startswith("js: "):
+                lines.append(line[4:])
+        return lines
+    finally:
+        os.unlink(script_path)
+
+
+def _list_windows_kwin() -> list[WindowInfo]:
+    lines = _kwin_run_script(_KWIN_ENUM_SCRIPT)
+    windows: list[WindowInfo] = []
+    for line in lines:
+        parts = line.split("|")
+        if len(parts) != 7:
+            continue
+        caption, pid_s, x_s, y_s, w_s, h_s, uuid = parts
+        try:
+            pid = int(pid_s)
+            left = int(x_s)
+            top = int(y_s)
+            width = int(w_s)
+            height = int(h_s)
+        except ValueError:
+            continue
+        windows.append(
+            WindowInfo(
+                title=caption,
+                pid=pid,
+                application=_process_name(pid),
+                left=left,
+                top=top,
+                width=width,
+                height=height,
+                handle=uuid,  # store UUID string as handle
+            )
+        )
+    return windows
+
+
+def _get_geometry_kwin(window: WindowInfo) -> dict | None:
+    """Refresh geometry for a KWin window using its UUID via getWindowInfo."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.getWindowInfo", str(window.handle)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        info: dict[str, str] = {}
+        for line in r.stdout.splitlines():
+            if ": " in line:
+                k, _, v = line.partition(": ")
+                info[k.strip()] = v.strip()
+        x = int(info["x"])
+        y = int(info["y"])
+        w = int(info["width"])
+        h = int(info["height"])
+        if w > 0 and h > 0:
+            return {"left": x, "top": y, "width": w, "height": h}
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Linux – X11 / XWayland
+# ---------------------------------------------------------------------------
+
+
+def _list_windows_x11() -> list[WindowInfo]:
     try:
         from Xlib import X
         from Xlib import display as xdisplay
     except ImportError as exc:
         raise ImportError(
-            "python-xlib is required on Linux. Install with: pip install python-xlib"
+            "python-xlib is required on Linux (X11). Install with: pip install python-xlib"
         ) from exc
 
     d = xdisplay.Display()
@@ -149,7 +336,6 @@ def _list_windows_linux() -> list[WindowInfo]:
 
             # Geometry
             geom = win.get_geometry()
-            # Translate to root coordinates
             translated = win.translate_coords(root, 0, 0)
             left = translated.x
             top = translated.y
@@ -176,7 +362,7 @@ def _list_windows_linux() -> list[WindowInfo]:
     return windows
 
 
-def _get_geometry_linux(window: WindowInfo) -> dict | None:
+def _get_geometry_x11(window: WindowInfo) -> dict | None:
     if window.handle is None:
         return None
     try:
