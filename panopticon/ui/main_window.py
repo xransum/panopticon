@@ -23,7 +23,7 @@ from datetime import datetime
 
 import numpy as np
 from PyQt6.QtCore import QSize, Qt, pyqtSlot
-from PyQt6.QtGui import QFont, QImage, QPixmap
+from PyQt6.QtGui import QFont, QImage, QPainter
 from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -44,33 +44,42 @@ from panopticon.ui.window_selector import WindowSelectorDialog
 from panopticon.utils.platform import WindowInfo
 
 
-class PreviewLabel(QLabel):
-    """A QLabel that scales its pixmap while preserving aspect ratio."""
+class PreviewWidget(QWidget):
+    """
+    Live-frame preview widget.
+
+    Accepts a QImage via set_frame() and draws it scaled to fit via
+    paintEvent/QPainter.drawImage().  This avoids creating a QPixmap
+    (and therefore a Win32 HBITMAP GDI object) on every frame, which
+    was the cause of GDI handle exhaustion after extended runtime.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background: #1a1a1a; border: 1px solid #333;")
         self.setMinimumSize(320, 240)
-        self._pixmap: QPixmap | None = None
+        self._image: QImage | None = None
 
-    def set_frame(self, pixmap: QPixmap):
-        self._pixmap = pixmap
-        self._update_scaled()
+    def set_frame(self, image: QImage):
+        self._image = image
+        self.update()  # schedule a repaint; does not block
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_scaled()
-
-    def _update_scaled(self):
-        if self._pixmap:
-            scaled = self._pixmap.scaled(
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        if self._image is not None:
+            # drawImage scales the source to fit the destination rect while
+            # letting Qt handle aspect-ratio alignment internally via the
+            # painter transform.  No QPixmap / HBITMAP is created.
+            scaled = self._image.scaled(
                 self.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            super().setPixmap(scaled)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawImage(x, y, scaled)
+        painter.end()
 
 
 class DetectionLogWidget(QPlainTextEdit):
@@ -147,7 +156,7 @@ class MainWindow(QMainWindow):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        self._preview = PreviewLabel()
+        self._preview = PreviewWidget()
         left_layout.addWidget(self._preview)
         self._no_target_label = QLabel('No window selected.\nUse "Select Window" to begin.')
         self._no_target_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -297,11 +306,16 @@ class MainWindow(QMainWindow):
         fps = len(self._frame_times)
         self._status_fps.setText(f"{fps} FPS")
 
-        # Convert BGR ndarray -> QImage -> QPixmap
+        # Convert BGR ndarray -> QImage.
+        # .copy() detaches the QImage from the numpy buffer so Qt owns the
+        # memory and the array can be safely GC'd after this slot returns.
+        # No QPixmap is created here — PreviewWidget draws the QImage directly
+        # via QPainter.drawImage(), which avoids allocating a Win32 HBITMAP
+        # (GDI object) on every frame and prevents GDI handle exhaustion.
         h, w, ch = frame.shape
-        rgb = frame[:, :, ::-1].copy()  # BGR -> RGB
-        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
-        self._preview.set_frame(QPixmap.fromImage(qimg))
+        rgb = np.ascontiguousarray(frame[:, :, ::-1])  # BGR -> RGB, ensure C-contiguous
+        qimg = QImage(rgb.data, w, h, rgb.strides[0], QImage.Format.Format_RGB888).copy()
+        self._preview.set_frame(qimg)
 
         # Append to log
         self._log.append_detections(detections)
